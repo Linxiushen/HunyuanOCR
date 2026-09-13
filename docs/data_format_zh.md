@@ -12,25 +12,29 @@
 
 ## 1. 原始 OCR JSONL 格式
 
-原始 JSONL 每行是一条训练样本。打包脚本 `normalize_sample()` 同时支持两种输入格式，并按下述优先级解析。
+原始 JSONL 每行是一条训练样本。`normalize_sample()` 支持两种输入格式：样本含 `conv` 字段时按格式 A 解析，否则按格式 B。两者最终都会被规范化为 `image` / `question` / `answer` 三元组。
 
-### 格式 A（优先）：`conv` + `img_path_sh` / `img_path_cq`
+| 字段                      | 类型                 | 适用格式 | 说明                                                                                                               |
+| ------------------------- | -------------------- | :------: | ------------------------------------------------------------------------------------------------------------------ |
+| `img_path` / `image_path` | `str` \| `list[str]` |  A + B   | 图片绝对路径，支持两种键名，列表则取第一项。                                                                       |
+| `conv`                    | `list[dict]`         |    A     | 取第 0 项的 `question` / `answer`。                                                                                |
+| `conversations`           | `list[dict]`         |    B     | `human`/`gpt`（或 `user`/`assistant`）交替对话；`human` 值中的 `<image>` 占位符会被去除后作为 question。           |
+
+### 格式 A
 
 ```json
 {
-  "img_path_sh": "/absolute/path/to/image.png",
+  "img_path": "/absolute/path/to/image.png",
   "conv": [
-    { "question": "提取文档图片中正文的所有信息用markdown格式表示...", "answer": "# Title\n\nBody text ..." }
+    {
+      "question": "提取文档图片中正文的所有信息用markdown格式表示...",
+      "answer": "# Title\n\nBody text ..."
+    }
   ]
 }
 ```
 
-| 字段                | 类型         | 是否必填 | 说明|
-| --------------------------- | ------------ | :------: | ----------------------------------------------------------------- |
-| `img_path_sh`/`img_path_cq` | `str`        |    ✅    | 图片绝对路径，优先取 `img_path_sh`，否则取 `img_path_cq`。        |
-| `conv`                | `list[dict]` |    ✅    | 取第 0 项的 `question` / `answer`。                               |
-
-### 格式 B（兼容）：`image_path` + `conversations`
+### 格式 B
 
 ```json
 {
@@ -44,13 +48,6 @@
   ]
 }
 ```
-
-| 字段            | 类型         | 是否必填 | 说明|
-| --------------- | ------------ | :------: | ----------------------------------------------------------------------------------------------- |
-| `image_path`    | `list[str]`  |    ✅    | 绝对路径列表，取第 0 张。|
-| `conversations` | `list[dict]` |    ✅    | `human`/`gpt`（或 `user`/`assistant`）交替对话；`human` 值中的 `<image>` 占位符会被去除后作为 question。 |
-
-> 只有当样本不含 `conv` 字段时才回退到格式 B。两种格式最终都会被规范化为 `image` / `question` / `answer`三元组。
 
 ## 2. 打包流水线
 
@@ -79,22 +76,22 @@ PACK_OUTPUT=./data/parsing_packed_20480.jsonl \
     bash scripts/pack_data.sh
 ```
 
-### 可调参数（环境变量）
+### 环境变量
 
-| 环境变量              |                                     默认值 | 含义                                                    |
-| --------------------- | -----------------------------------------: | ------------------------------------------------------- |
-| `MODEL_PATH`          |                                    *(必填)* | HunyuanOCR 基座模型目录（用于 tokenizer + processor）   |
-| `INPUT_LIST`          |                    `./configs/data_list.txt` | 原始 JSONL 清单文件路径                                 |
-| `COUNT_OUTPUT_DIR`    |                 `./data/parsing_jsonl_count` | 计数阶段输出的临时目录                                  |
-| `PACK_OUTPUT`         |     `./data/parsing_packed_{PACK_LEN}.jsonl` | 最终打包好的 JSONL                                      |
-| `PACK_LEN`            |                                     `20480` | 每行打包序列的最大长度                                  |
-| `NUM_PROCESSES`       |                                       `32` | 计数阶段的多进程 worker 数                              |
-| `THREADS_PER_PROCESS` |                                        `8` | 每个计数 worker 的线程数                                |
-| `LOG_FILE`            |                            `pack_data.log` | 进度日志路径                                            |
+| 环境变量              |                                   默认值 | 含义                                                  |
+| --------------------- | ---------------------------------------: | ----------------------------------------------------- |
+| `MODEL_PATH`          |                                 _(必填)_ | HunyuanOCR 基座模型目录（用于 tokenizer + processor） |
+| `INPUT_LIST`          |                `./configs/data_list.txt` | 原始 JSONL 清单文件路径                               |
+| `COUNT_OUTPUT_DIR`    |             `./data/parsing_jsonl_count` | 计数阶段输出的临时目录                                |
+| `PACK_OUTPUT`         | `./data/parsing_packed_{PACK_LEN}.jsonl` | 最终打包好的 JSONL                                    |
+| `PACK_LEN`            |                                  `20480` | 每行打包序列的最大长度                                |
+| `NUM_PROCESSES`       |                                     `32` | 计数阶段的多进程 worker 数                            |
+| `THREADS_PER_PROCESS` |                                      `8` | 每个计数 worker 的线程数                              |
+| `LOG_FILE`            |                          `pack_data.log` | 进度日志路径                                          |
 
-### 输出格式（打包后的 JSONL）
+### 输出格式
 
-每一行是一个 JSON 数组，数组中的每项是训练 dataset 实际消费的样本：
+输出文件为打包后的 JSONL 格式，每一行是一个由训练样本组成的 JSON 数组：
 
 ```json
 [
@@ -137,13 +134,11 @@ with open('./data/parsing_packed_20480.jsonl') as f:
 "
 ```
 
-预期输出类似：
+每个 pack 都应接近 `pack_length=20480`：
 
 ```
 pack 0: 7 samples, 20438 tokens
 pack 1: 5 samples, 19821 tokens
 pack 2: 12 samples, 20301 tokens
-pack 3: 3 samples, 18654 tokens
+...
 ```
-
-每个 pack 都接近 `pack_length=20480`，这正是打包的目标。

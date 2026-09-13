@@ -188,8 +188,7 @@ def process_chart_deplot_task(response: str, ref_answer: str) -> dict[str, Any]:
     # 3) 类别不匹配：reward=0，仍是有效样本（给训练负向信号）
     if pred_format != ref_format:
         analysis["reason"] = (
-            f"format mismatch: pred={pred_format} vs ref={ref_format}; "
-            "reward=0 (valid negative signal)"
+            f"format mismatch: pred={pred_format} vs ref={ref_format}; reward=0 (valid negative signal)"
         )
         analysis["reward"] = 0.0
         return {"analysis": analysis, "is_valid": True, "reward": 0.0}
@@ -206,7 +205,5 @@ def process_chart_deplot_task(response: str, ref_answer: str) -> dict[str, Any]:
         reward = 0.0
     reward = max(0.0, min(1.0, float(reward)))
     analysis["reward"] = reward
-    analysis["reason"] = (
-        f"format matched ({ref_format}); reward=map_slight={reward:.4f}"
-    )
+    analysis["reason"] = f"format matched ({ref_format}); reward=map_slight={reward:.4f}"
     return {"analysis": analysis, "is_valid": True, "reward": reward}

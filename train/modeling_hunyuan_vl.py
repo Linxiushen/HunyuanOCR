@@ -817,9 +817,7 @@ class HunYuanVLPreTrainedModel(PreTrainedModel):
                 target_device = None
             new_inv_freq = module._compute_inv_freq(device=target_device)
             with torch.no_grad():
-                module.inv_freq.data.copy_(
-                    new_inv_freq.to(device=module.inv_freq.device, dtype=module.inv_freq.dtype)
-                )
+                module.inv_freq.data.copy_(new_inv_freq.to(device=module.inv_freq.device, dtype=module.inv_freq.dtype))
                 # `original_inv_freq` is an alias of `inv_freq`; the in-place copy_ above
                 # already updates it. Refresh the cos/sin cache from the corrected inv_freq.
                 module._set_cos_sin_cache(
@@ -912,7 +910,6 @@ class HunYuanVLModel(HunYuanVLPreTrainedModel):
                 cache_position=cache_position,
                 **kwargs,
             )
-
 
         hidden_states = self.norm(hidden_states)
 
@@ -1205,12 +1202,12 @@ class HunYuanVLForConditionalGeneration(HunYuanVLPreTrainedModel, GenerationMixi
                     # cache_position: (1,) tensor with current position
                     pos = cache_position[-1:]  # (1,)
                     # Expand to (1, 4, 1): all 4 dims use same sequential position for text tokens
-                    inputs["position_ids"] = pos.unsqueeze(0).unsqueeze(0).expand(
-                        position_ids.shape[0], position_ids.shape[1], 1
-                    ).clone()
+                    inputs["position_ids"] = (
+                        pos.unsqueeze(0).unsqueeze(0).expand(position_ids.shape[0], position_ids.shape[1], 1).clone()
+                    )
                 else:
                     # Fallback: use last position + 1
-                    inputs["position_ids"] = (position_ids[:, :, -1:] + 1)
+                    inputs["position_ids"] = position_ids[:, :, -1:] + 1
             else:
                 # Prefill: pass full 4D position_ids as-is
                 inputs["position_ids"] = position_ids
@@ -1305,7 +1302,6 @@ class HunYuanVLForConditionalGeneration(HunYuanVLPreTrainedModel, GenerationMixi
             )
 
         return special_image_mask
-
 
 
 __all__ = [

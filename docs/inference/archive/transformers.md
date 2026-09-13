@@ -1,4 +1,4 @@
-# Setup C · HunyuanOCR-1.5 native transformers inference (multi-GPU, no vLLM)
+# Setup C · HunyuanOCR-1.5 native transformers inference (multi-GPU, no vLLM) <!-- omit in toc -->
 
 [中文阅读](./transformers_zh.md)
 
@@ -19,7 +19,7 @@ markedly slower than vLLM).
 
 ---
 
-## Contents
+## Contents <!-- omit in toc -->
 
 - [1. Why a separate environment](#1-why-a-separate-environment)
 - [2. Environment setup](#2-environment-setup)

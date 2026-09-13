@@ -1,4 +1,4 @@
-# Setup A · HunyuanOCR-1.5 with vLLM 0.18.1 (CUDA 12, AR only)
+# Setup A · HunyuanOCR-1.5 with vLLM 0.18.1 (CUDA 12, AR only) <!-- omit in toc -->
 
 [中文阅读](./vLLM_zh.md)
 
@@ -13,7 +13,7 @@ for native transformers inference use [`transformers`](./transformers.md).
 
 ---
 
-## Contents
+## Contents <!-- omit in toc -->
 
 - [1. Environment setup](#1-environment-setup)
 - [2. Download the weights](#2-download-the-weights)
@@ -99,13 +99,13 @@ pkill -9 -f "VLLM::EngineCore"; pkill -9 -f "vllm serve"
 
 ## 4. Inference
 
-### Sampling parameters (aligned with the official settings, built in, do not change)
+### Sampling parameters (aligned with the official settings, built in, do not change) <!-- omit in toc -->
 
 `temperature=0.0`, `top_p=1.0`, `top_k=-1`, `repetition_penalty=1.08`, streaming
 generation + tail-repetition early-stop + tail-repetition cleanup (to prevent
 greedy-decoding repetition degeneration).
 
-### Single image
+### Single image <!-- omit in toc -->
 
 ```bash
 python infer_vllm_client.py --image /path/to/doc.png --task-type doc_parse \
@@ -116,7 +116,7 @@ python infer_vllm_client.py --image /path/to/doc.png --task-type doc_parse \
 - `doc_parse` applies markdown normalization automatically; `--no-doc-postprocess`
   disables it.
 
-### Batch (directory)
+### Batch (directory) <!-- omit in toc -->
 
 ```bash
 python batch_infer.py --image-dir /path/imgs --out-dir /path/out \

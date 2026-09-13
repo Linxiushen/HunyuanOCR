@@ -286,7 +286,11 @@ def process_spotting_task(response: str, ref_answer: str) -> dict:
 
     resp_norm = response.strip().replace(".", "").replace("。", "")
     ref_norm = ref_answer.strip().replace(".", "").replace("。", "")
-    if resp_norm == ref_norm or ("没有文字" in resp_norm and ref_norm == "") or ("没有文字" in resp_norm and "没有文字" in ref_norm):
+    if (
+        resp_norm == ref_norm
+        or ("没有文字" in resp_norm and ref_norm == "")
+        or ("没有文字" in resp_norm and "没有文字" in ref_norm)
+    ):
         return {"analysis": "Responses are identical.", "is_valid": True, "reward": 1.0}
 
     resp_format = _detect_spotting_format(response)

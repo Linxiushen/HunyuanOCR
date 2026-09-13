@@ -104,30 +104,22 @@ def train(attn_implementation=None):
     if attn_implementation is None:
         attn_implementation = os.environ.get("HYOCR_ATTN_IMPLEMENTATION", "eager")
 
-    parser = transformers.HfArgumentParser(
-        (ModelArguments, DataArguments, TrainingArguments)
-    )
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
-    
 
     local_rank = training_args.local_rank
     if local_rank is None or local_rank < 0:
         local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     os.makedirs(training_args.output_dir, exist_ok=True)
 
-    training_args.lr_scheduler_kwargs = {'min_lr': 2e-6}
+    training_args.lr_scheduler_kwargs = {"min_lr": 2e-6}
     # Load processor
     rank0_print("Loading processor...")
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
-        use_fast=False,
-        trust_remote_code=True
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, use_fast=False, trust_remote_code=True)
     processor = AutoProcessor.from_pretrained(
         model_args.model_name_or_path,
     )
-    
+
     # Load model
     rank0_print(f"Loading model... with bf16 type: {training_args.bf16}")
     if training_args.from_scratch:
@@ -135,6 +127,7 @@ def train(attn_implementation=None):
         from transformers.models.hunyuan_vl.configuration_hunyuan_vl import (
             HunYuanVLConfig,
         )
+
         config = HunYuanVLConfig.from_pretrained(config_path)
         config._attn_implementation = attn_implementation
         model = HunYuanVLForConditionalGeneration(config)
@@ -145,7 +138,7 @@ def train(attn_implementation=None):
             attn_implementation=attn_implementation,
             # attn_implementation="eager",
             dtype=torch.bfloat16 if training_args.bf16 else torch.float32,
-            trust_remote_code=True
+            trust_remote_code=True,
         )
 
     # Packed/flatten training uses the model's native packing support (block-diagonal
@@ -165,6 +158,7 @@ def train(attn_implementation=None):
 
     if training_args.lora_enable:
         from peft import LoraConfig, TaskType, get_peft_model
+
         print("LoRA enabled")
 
         for p in model.parameters():
@@ -198,16 +192,16 @@ def train(attn_implementation=None):
         is_packed=data_args.data_flatten or data_args.data_packing,
         model_config=model.config,
     )
-    
+
     eval_dataset = None
     if data_args.eval_data_path:
         eval_dataset = VLDataset(
             data_path=data_args.eval_data_path,
             image_folder=data_args.image_folder,
             processor=processor,
-            max_length=data_args.packed_max_length
+            max_length=data_args.packed_max_length,
         )
-    
+
     # Data collator - choose based on whether packing is enabled
     if data_args.data_flatten or data_args.data_packing:
         rank0_print("Using packed data collator for efficient training...")
@@ -217,7 +211,10 @@ def train(attn_implementation=None):
         data_collator = VLDataCollator(processor=processor, max_length=data_args.packed_max_length)
 
     trainer = Trainer(
-        model=model, processing_class=tokenizer, args=training_args, train_dataset=train_dataset,
+        model=model,
+        processing_class=tokenizer,
+        args=training_args,
+        train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
     )
@@ -232,7 +229,7 @@ def train(attn_implementation=None):
     model.config.use_cache = True
 
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
-    
+
     processor.save_pretrained(training_args.output_dir)
 
 

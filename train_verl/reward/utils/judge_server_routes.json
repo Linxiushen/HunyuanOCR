@@ -1,5 +1,3 @@
 {
-  "Qwen/Qwen3-30B-A3B": [
-    "<IP>:<PORT>"
-  ]
+  "Qwen/Qwen3-30B-A3B": ["<IP>:<PORT>"]
 }

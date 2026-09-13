@@ -12,26 +12,31 @@ The pipeline: raw JSONL → tokenize + count → pack → training-ready JSONL.
 
 ## 1. Raw OCR JSONL Schema
 
-Each line in a raw JSONL file is one training sample. The packing script's `normalize_sample()`
-accepts two input formats, resolved in the following priority order.
+Each line in a raw JSONL file is one training sample. `normalize_sample()` accepts two formats:
+Format A when the sample carries a `conv` field, Format B otherwise. Both are normalized to an
+`image` / `question` / `answer` triple.
 
-### Format A (preferred): `conv` + `img_path_sh` / `img_path_cq`
+| Field                     | Type                 | Format | Notes                                                                                                                                                       |
+| ------------------------- | -------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `img_path` / `image_path` | `str` \| `list[str]` | A + B  | Absolute image path. Either key is accepted; a list takes its first entry.                                                                                  |
+| `conv`                    | `list[dict]`         | A      | The 0-th turn's `question` / `answer` is used.                                                                                                              |
+| `conversations`           | `list[dict]`         | B      | Alternating `human`/`gpt` (or `user`/`assistant`) turns. The `<image>` placeholder in the `human` value is stripped and the remainder becomes the question. |
+
+### Format A
 
 ```json
 {
-  "img_path_sh": "/absolute/path/to/image.png",
+  "img_path": "/absolute/path/to/image.png",
   "conv": [
-    { "question": "Extract all body text from the document image as markdown...", "answer": "# Title\n\nBody text ..." }
+    {
+      "question": "Extract all body text from the document image as markdown...",
+      "answer": "# Title\n\nBody text ..."
+    }
   ]
 }
 ```
 
-| Field                       | Type         | Required | Notes                                                                      |
-| --------------------------- | ------------ | -------- | -------------------------------------------------------------------------- |
-| `img_path_sh`/`img_path_cq` | `str`        | ✅       | Absolute image path; `img_path_sh` is used if present, else `img_path_cq`. |
-| `conv`                      | `list[dict]` | ✅       | The 0-th turn's `question` / `answer` is used.                             |
-
-### Format B (fallback): `image_path` + `conversations`
+### Format B
 
 ```json
 {
@@ -45,14 +50,6 @@ accepts two input formats, resolved in the following priority order.
   ]
 }
 ```
-
-| Field           | Type         | Required | Notes                                                                                |
-| --------------- | ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `image_path`    | `list[str]`  | ✅       | List of absolute paths; the first image is used.                |
-| `conversations` | `list[dict]` | ✅       | Alternating `human`/`gpt` (or `user`/`assistant`) turns. The `<image>` placeholder in the `human` value is stripped and the remainder becomes the question. |
-
-> Format B is only used when the sample has no `conv` field. Both formats are normalized to an
-> `image` / `question` / `answer` triple.
 
 ## 2. Packing Pipeline
 
@@ -81,7 +78,7 @@ PACK_OUTPUT=./data/parsing_packed_20480.jsonl \
     bash scripts/pack_data.sh
 ```
 
-### Tunable parameters (env vars)
+### Environment variables
 
 | Env var               |                                  Default | Description                                           |
 | --------------------- | ---------------------------------------: | ----------------------------------------------------- |
@@ -94,9 +91,9 @@ PACK_OUTPUT=./data/parsing_packed_20480.jsonl \
 | `THREADS_PER_PROCESS` |                                      `8` | Threads per count worker                              |
 | `LOG_FILE`            |                          `pack_data.log` | Progress log path                                     |
 
-### Output schema (packed JSONL)
+### Output schema
 
-Each output line is a JSON array. Each item is the sample consumed by the training dataset:
+The output is a packed JSONL file, where each line is a JSON array of training samples:
 
 ```json
 [
@@ -139,13 +136,11 @@ with open('./data/parsing_packed_20480.jsonl') as f:
 "
 ```
 
-You should see something like:
+Every pack should land close to `pack_length=20480`:
 
 ```
 pack 0: 7 samples, 20438 tokens
 pack 1: 5 samples, 19821 tokens
 pack 2: 12 samples, 20301 tokens
-pack 3: 3 samples, 18654 tokens
+...
 ```
-
-Each pack is close to `pack_length=20480` — that's the goal.

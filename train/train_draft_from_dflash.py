@@ -74,13 +74,14 @@ class DFlashInitArguments:
       - config.json          (matching DFlashDraftModel structure)
       - model.safetensors    (or pytorch_model.bin)
     """
+
     dflash_init_dir: str | None = field(
         default=None,
         metadata={
             "help": "Directory containing a previously-trained DFlash draft "
-                    "checkpoint. If omitted, draft is randomly initialized "
-                    "(NOT recommended). Conflicts with the default behavior "
-                    "of copying weights from target's last K layers."
+            "checkpoint. If omitted, draft is randomly initialized "
+            "(NOT recommended). Conflicts with the default behavior "
+            "of copying weights from target's last K layers."
         },
     )
 
@@ -129,9 +130,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     state_dict = trainer.model.state_dict()
     if trainer.args.should_save:
         draft_state_dict = {
-            k.replace("draft_model.", ""): v
-            for k, v in state_dict.items()
-            if not k.startswith("target_model.")
+            k.replace("draft_model.", ""): v for k, v in state_dict.items() if not k.startswith("target_model.")
         }
         cpu_state_dict = {k: v.cpu() for k, v in draft_state_dict.items()}
         del state_dict
@@ -145,8 +144,7 @@ def train(attn_implementation: str = "flash_attention_2"):
     global local_rank
 
     parser = transformers.HfArgumentParser(
-        (ModelArguments, DataArguments, TrainingArguments,
-         DraftArguments, DFlashInitArguments)
+        (ModelArguments, DataArguments, TrainingArguments, DraftArguments, DFlashInitArguments)
     )
     (
         model_args,
@@ -210,10 +208,7 @@ def train(attn_implementation: str = "flash_attention_2"):
             "instead of train_draft_from_dflash.py."
         )
 
-    rank0_print(
-        f"Initializing draft model from dflash directory: "
-        f"{dflash_init_args.dflash_init_dir}"
-    )
+    rank0_print(f"Initializing draft model from dflash directory: {dflash_init_args.dflash_init_dir}")
     model = MYDraftFromDFlash(
         config=target_model.config,
         target_model=target_model,
@@ -228,20 +223,16 @@ def train(attn_implementation: str = "flash_attention_2"):
     # dflash_init_dir's weights). Useful for resume-from-best-ckpt scenarios.
     if draft_args.load_draft_path is not None:
         from safetensors.torch import load_file as safetensors_load_file
-        draft_state_dict = safetensors_load_file(
-            draft_args.load_draft_path, device="cpu"
-        )
+
+        draft_state_dict = safetensors_load_file(draft_args.load_draft_path, device="cpu")
         draft_state_dict_new = {}
         for k, v in draft_state_dict.items():
             if k.startswith("draft_model."):
-                draft_state_dict_new[k[len("draft_model."):]] = v
+                draft_state_dict_new[k[len("draft_model.") :]] = v
             else:
                 draft_state_dict_new[k] = v
         model.load_state_dict(draft_state_dict_new, strict=False)
-        rank0_print(
-            f"Additional --load_draft_path applied: "
-            f"{draft_args.load_draft_path}"
-        )
+        rank0_print(f"Additional --load_draft_path applied: {draft_args.load_draft_path}")
 
     if local_rank == 0:
         model.print_parameter_info()

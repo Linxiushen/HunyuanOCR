@@ -20,6 +20,7 @@ from typing_extensions import Unpack
 # FlexAttention imports
 try:
     from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
     FLEX_ATTENTION_AVAILABLE = True
 except ImportError:
     FLEX_ATTENTION_AVAILABLE = False
@@ -34,7 +35,6 @@ from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
 
 
 from transformers import AutoConfig, DynamicCache
@@ -64,6 +64,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+
 class Qwen3DFlashAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -75,7 +76,7 @@ class Qwen3DFlashAttention(nn.Module):
         self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
         self.scaling = self.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
-        self.is_causal = False  
+        self.is_causal = False
         self.q_proj = nn.Linear(
             config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
         )
@@ -91,7 +92,7 @@ class Qwen3DFlashAttention(nn.Module):
         self.q_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.k_norm = Qwen3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.sliding_window = None
-        
+
         # config.sliding_window if config.layer_types[layer_idx] == "sliding_attention" else None
 
     def forward(
@@ -125,7 +126,7 @@ class Qwen3DFlashAttention(nn.Module):
         attn_fn: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
             attn_fn = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
-        
+
             # Ensure query, key, value have the same dtype (RoPE may upcast q/k to float32 while v stays in bfloat16)
         target_dtype = v.dtype
         if k.dtype != target_dtype:
@@ -147,6 +148,7 @@ class Qwen3DFlashAttention(nn.Module):
         attn_output = attn_output.reshape(bsz, q_len, -1)
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
+
 
 class Qwen3DFlashDecoderLayer(GradientCheckpointingLayer):
     def __init__(self, config: Qwen3Config, layer_idx: int):
@@ -190,6 +192,7 @@ class Qwen3DFlashDecoderLayer(GradientCheckpointingLayer):
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
         return hidden_states
+
 
 class DFlashDraftModel(Qwen3PreTrainedModel):
     config_class = Qwen3Config
@@ -257,7 +260,7 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
         temperature: float = 0.0,
         **kwargs,
     ):
-        self.eval() 
+        self.eval()
         num_input_tokens = input_ids.shape[1]
         max_length = num_input_tokens + max_new_tokens
         if eos_token_id is None:
@@ -270,32 +273,31 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
             dtype=torch.long,
             device=target.device,
         )
-        
 
         past_key_values_target = DynamicCache()
         past_key_values_draft = DynamicCache()
 
         # Prefill stage
         output = target(
-            input_ids=input_ids, # 1 * n
+            input_ids=input_ids,  # 1 * n
             position_ids=position_ids,
             past_key_values=past_key_values_target,
             use_cache=True,
             pixel_values=pixel_values,
             image_grid_thw=image_grid_thw,
-            logits_to_keep=1, 
+            logits_to_keep=1,
             output_hidden_states=True,
             **kwargs,
         )
-        
+
         output_ids[:, :num_input_tokens] = input_ids
         next_token = sample(output.logits, temperature)
-        output_ids[:, num_input_tokens:num_input_tokens+1] = next_token
+        output_ids[:, num_input_tokens : num_input_tokens + 1] = next_token
         target_hidden = extract_context_feature(output.hidden_states, self.target_layer_ids)
 
         position_ids = torch.arange(output_ids.shape[1], device=target.device).unsqueeze(0)
         # position_ids = torch.concat([position_ids, torch.arange(num_input_tokens, num_input_tokens+block_size, device=target.device).unsqueeze(0).unsqueeze(0).expand(1, 4, -1)], dim=2)
-        
+
         # torch.arange(output_ids.shape[1], device=target.device).unsqueeze(0)
 
         # Decode stage
@@ -303,23 +305,24 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
         num_decoding_steps = 0
         start = input_ids.shape[1]
         while start < max_length:
-            
             block_output_ids = output_ids[:, start : start + block_size].clone()
             # block_position_ids = position_ids[:, start : start + block_size]
             noise_embedding = target.model.embed_tokens(block_output_ids)
-            draft_logits = target.lm_head(self(
-                target_hidden=target_hidden,
-                noise_embedding=noise_embedding,
-                position_ids=position_ids[:, past_key_values_draft.get_seq_length(): start + block_size],
-                past_key_values=past_key_values_draft,
-                use_cache=True,
-                is_causal=False,
-            )[:, -block_size + 1:, :])
+            draft_logits = target.lm_head(
+                self(
+                    target_hidden=target_hidden,
+                    noise_embedding=noise_embedding,
+                    position_ids=position_ids[:, past_key_values_draft.get_seq_length() : start + block_size],
+                    past_key_values=past_key_values_draft,
+                    use_cache=True,
+                    is_causal=False,
+                )[:, -block_size + 1 :, :]
+            )
             past_key_values_draft.crop(start)
-            block_output_ids[:, 1:] = sample(draft_logits) # 表示 next_i + 1
+            block_output_ids[:, 1:] = sample(draft_logits)  # 表示 next_i + 1
 
             output = target(
-                input_ids=block_output_ids, # block_size 个
+                input_ids=block_output_ids,  # block_size 个
                 position_ids=None,
                 past_key_values=past_key_values_target,
                 use_cache=True,
@@ -327,17 +330,19 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
                 **kwargs,
             )
 
-            posterior = sample(output.logits, temperature) # block_size + 1 个
+            posterior = sample(output.logits, temperature)  # block_size + 1 个
             acceptance_length = (block_output_ids[:, 1:] == posterior[:, :-1]).cumprod(dim=1).sum(dim=1)[0].item()
             output_ids[:, start : start + acceptance_length + 1] = block_output_ids[:, : acceptance_length + 1]
             # next_token = posterior[:, acceptance_length: acceptance_length + 1]
             output_ids[:, start + acceptance_length + 1] = posterior[:, acceptance_length]
             start += acceptance_length + 1
             past_key_values_target.crop(start)
-            target_hidden = extract_context_feature(output.hidden_states, self.target_layer_ids)[:, :acceptance_length + 1, :]
+            target_hidden = extract_context_feature(output.hidden_states, self.target_layer_ids)[
+                :, : acceptance_length + 1, :
+            ]
             acceptance_lengths.append(acceptance_length)
             num_decoding_steps += 1
-            
+
             # Check for EOS token
             if eos_token_id is not None:
                 # Normalize eos_token_id to list
@@ -346,10 +351,10 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
                 generated_tokens = output_ids[:, num_input_tokens:start]
                 if any((generated_tokens == eos_id).any() for eos_id in eos_list):
                     break
-        
+
         output_ids = output_ids[:, :max_length]
         output_ids = output_ids[:, output_ids[0] != self.mask_token_id]
-        
+
         # Truncate at first EOS token
         if eos_token_id is not None:
             eos_list = eos_token_id if isinstance(eos_token_id, (list, tuple)) else [eos_token_id]
@@ -358,24 +363,28 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
             generated_tokens = output_ids[0, num_input_tokens:]
             stop_token_indices = torch.isin(generated_tokens, eos_tensor).nonzero(as_tuple=True)[0]
             if stop_token_indices.numel() > 0:
-                output_ids = output_ids[:, :num_input_tokens + stop_token_indices[0] + 1]
-        
+                output_ids = output_ids[:, : num_input_tokens + stop_token_indices[0] + 1]
+
         # Calculate and print statistics
         total_generated = output_ids.shape[1] - num_input_tokens
         step_decoding = num_decoding_steps
         num_accepted_total = sum(acceptance_lengths)
         num_drafted_total = len(acceptance_lengths) * (block_size - 1)  # 每步 draft block_size-1 个 token
         acceptance_rate = num_accepted_total / num_drafted_total if num_drafted_total > 0 else 0.0
-        avg_acceptance_length = sum(acceptance_lengths) / len(acceptance_lengths) if len(acceptance_lengths) > 0 else 0.0
-        
+        avg_acceptance_length = (
+            sum(acceptance_lengths) / len(acceptance_lengths) if len(acceptance_lengths) > 0 else 0.0
+        )
+
         full_accept_count = sum(1 for l in acceptance_lengths if l == (block_size - 1))
         full_accept_rate = full_accept_count / len(acceptance_lengths) if len(acceptance_lengths) > 0 else 0.0
-        
-        print(f"[MTP Speculative] Generated {total_generated}/{step_decoding} tokens, "
-              f"acceptance rate: {acceptance_rate:.2%} "
-              f"({num_accepted_total}/{num_drafted_total}), "
-              f"avg acceptance length: {avg_acceptance_length:.2f}, "
-              f"full accept rate: {full_accept_rate:.2%} ({full_accept_count}/{len(acceptance_lengths)})")
+
+        print(
+            f"[MTP Speculative] Generated {total_generated}/{step_decoding} tokens, "
+            f"acceptance rate: {acceptance_rate:.2%} "
+            f"({num_accepted_total}/{num_drafted_total}), "
+            f"avg acceptance length: {avg_acceptance_length:.2f}, "
+            f"full accept rate: {full_accept_rate:.2%} ({full_accept_count}/{len(acceptance_lengths)})"
+        )
         return output_ids, avg_acceptance_length, full_accept_rate
 
 
@@ -438,7 +447,7 @@ class MYDraft(Qwen3PreTrainedModel):
             p.requires_grad = False
         self.target_model.eval()
 
-        hidden_size  = config.hidden_size
+        hidden_size = config.hidden_size
         self.hidden_size = hidden_size
         # config = copy.deepcopy(config)
         # Load the DFlash draft-model config template (config.json + dflash.py).
@@ -447,6 +456,7 @@ class MYDraft(Qwen3PreTrainedModel):
         # compatible config.json + dflash.py (e.g. the dflash/ subfolder that
         # ships with the HuggingFace HunyuanOCR release).
         import os
+
         _dflash_cfg_dir = os.environ.get(
             "HYOCR_DFLASH_CONFIG_DIR",
             str(Path(__file__).parent / "configs"),
@@ -456,26 +466,26 @@ class MYDraft(Qwen3PreTrainedModel):
         config_dflash.num_hidden_layers = num_draft_layers
         config_dflash.block_size = config.block_size
         self.draft_model = DFlashDraftModel(config_dflash)
-        
+
         # Initialize draft_model layers from the last num_draft_layers of target_model
         self._initialize_draft_from_target(num_draft_layers)
-        
+
         # MTP configuration
         self.block_size = config.block_size
         self.mask_token_id = getattr(config, "mask_token_id", 120817)  # <｜hy_place▁holder▁no▁799｜>
-        
+
         self.only_draft = only_draft
 
     def _initialize_draft_from_target(self, num_draft_layers: int):
         """
         Initialize draft_model layers from the last num_draft_layers of target_model.
-        
+
         We copy weights from target_model.model.layers[-num_draft_layers:] to draft_model.layers.
-        
+
         Note: The attention modules have different structures:
         - Target: HunYuanVLAttention (standard self-attention)
         - Draft: HunYuanVLDFlashAttention (cross-attention with target hidden states)
-        
+
         We copy:
         - MLP (fully compatible)
         - LayerNorm (input_layernorm, post_attention_layernorm)
@@ -484,44 +494,45 @@ class MYDraft(Qwen3PreTrainedModel):
         """
         target_layers = self.target_model.model.layers
         total_layers = len(target_layers)
-        
+
         if num_draft_layers > total_layers:
             raise ValueError(
                 f"num_draft_layers ({num_draft_layers}) cannot exceed total target layers ({total_layers})"
             )
-        
+
         # Get the last num_draft_layers from target model
         start_layer_idx = total_layers - num_draft_layers
-        
-        print(f"Initializing {num_draft_layers} draft layers from target layers {start_layer_idx} to {total_layers-1}")
-        
+
+        print(
+            f"Initializing {num_draft_layers} draft layers from target layers {start_layer_idx} to {total_layers - 1}"
+        )
+
         for draft_idx, target_idx in enumerate(range(start_layer_idx, total_layers)):
             target_layer = target_layers[target_idx]
             draft_layer = self.draft_model.layers[draft_idx]
-            
+
             # Copy MLP weights (fully compatible)
             draft_layer.mlp.load_state_dict(target_layer.mlp.state_dict())
-            
+
             # Copy LayerNorm weights
             draft_layer.input_layernorm.load_state_dict(target_layer.input_layernorm.state_dict())
             draft_layer.post_attention_layernorm.load_state_dict(target_layer.post_attention_layernorm.state_dict())
-            
+
             # Copy attention projection weights
             draft_layer.self_attn.q_proj.load_state_dict(target_layer.self_attn.q_proj.state_dict())
             draft_layer.self_attn.k_proj.load_state_dict(target_layer.self_attn.k_proj.state_dict())
             draft_layer.self_attn.v_proj.load_state_dict(target_layer.self_attn.v_proj.state_dict())
             draft_layer.self_attn.o_proj.load_state_dict(target_layer.self_attn.o_proj.state_dict())
-            
+
             # Copy attention LayerNorms
             draft_layer.self_attn.q_norm.load_state_dict(target_layer.self_attn.query_layernorm.state_dict())
             draft_layer.self_attn.k_norm.load_state_dict(target_layer.self_attn.key_layernorm.state_dict())
-            
+
             print(f"  Initialized draft layer {draft_idx} from target layer {target_idx}")
-        
+
         # Copy final norm from target model
         self.draft_model.norm.load_state_dict(self.target_model.model.norm.state_dict())
         print("Initialized draft_model.norm from target_model.model.norm")
-
 
     # ------------------------------------------------------------------
     # MTP input construction
@@ -564,7 +575,7 @@ class MYDraft(Qwen3PreTrainedModel):
             all_context_position_ids.append(sample_position_ids)
 
             if sample_labels is not None:
-                pred_mask = (sample_labels != -100)
+                pred_mask = sample_labels != -100
             else:
                 pred_mask = torch.ones(sample_len, dtype=torch.bool, device=device)
 
@@ -574,9 +585,7 @@ class MYDraft(Qwen3PreTrainedModel):
 
             sample_block_num = self.sample_block_num
             if len(pred_positions) > sample_block_num:
-                rand_indices = torch.randperm(
-                    len(pred_positions), device=device
-                )[:sample_block_num]
+                rand_indices = torch.randperm(len(pred_positions), device=device)[:sample_block_num]
                 pred_positions = pred_positions[rand_indices].sort()[0]
 
             num_blocks = len(pred_positions)
@@ -588,21 +597,15 @@ class MYDraft(Qwen3PreTrainedModel):
 
             valid_mask = target_indices_flat < sample_len
 
-            sample_mtp_input_ids = torch.full(
-                (block_total_len,), mask_token_id, dtype=torch.long, device=device
-            )
-            first_token_mask = torch.zeros(
-                block_total_len, dtype=torch.bool, device=device
-            )
+            sample_mtp_input_ids = torch.full((block_total_len,), mask_token_id, dtype=torch.long, device=device)
+            first_token_mask = torch.zeros(block_total_len, dtype=torch.bool, device=device)
             first_token_mask[::block_size] = True
 
             valid_first_mask = first_token_mask & valid_mask
             safe_indices = target_indices_flat[valid_first_mask].clamp(max=sample_len - 1)
             sample_mtp_input_ids[valid_first_mask] = sample_input_ids[safe_indices]
 
-            sample_mtp_position_ids = torch.zeros(
-                (1, block_total_len), dtype=torch.long, device=device
-            )
+            sample_mtp_position_ids = torch.zeros((1, block_total_len), dtype=torch.long, device=device)
 
             for i in range(block_total_len):
                 target_idx = target_indices_flat[i].item()
@@ -611,9 +614,7 @@ class MYDraft(Qwen3PreTrainedModel):
                 else:
                     last_valid_idx = sample_len - 1
                     offset = target_idx - last_valid_idx
-                    sample_mtp_position_ids[:, i] = (
-                        sample_position_ids[:, last_valid_idx] + offset
-                    )
+                    sample_mtp_position_ids[:, i] = sample_position_ids[:, last_valid_idx] + offset
 
             label_indices = target_indices_flat
             label_valid_mask = label_indices < sample_len
@@ -624,9 +625,7 @@ class MYDraft(Qwen3PreTrainedModel):
             # anchor / block-start slot) we still record the label so distill
             # / debug paths have it, but we mask it out from the loss via
             # ``sample_weight_mask`` below (pos_in_block > 0).
-            sample_mask_labels = torch.full(
-                (block_total_len,), -100, dtype=torch.long, device=device
-            )
+            sample_mask_labels = torch.full((block_total_len,), -100, dtype=torch.long, device=device)
             safe_label_indices = label_indices[label_valid_mask].clamp(max=sample_len - 1)
             sample_mask_labels[label_valid_mask] = sample_input_ids[safe_label_indices]
 
@@ -644,9 +643,7 @@ class MYDraft(Qwen3PreTrainedModel):
             sample_weight_mask = label_valid_mask.float() * (pos_in_block > 0).float()
             # Gate by the label-position pred_mask (i.e. only count slots whose
             # to-be-predicted token is itself a real label, not -100 padding).
-            label_pred_mask = torch.zeros(
-                block_total_len, dtype=torch.bool, device=device
-            )
+            label_pred_mask = torch.zeros(block_total_len, dtype=torch.bool, device=device)
             label_pred_mask[label_valid_mask] = pred_mask[safe_label_indices]
             sample_weight_mask = sample_weight_mask * label_pred_mask.float()
 
@@ -654,9 +651,7 @@ class MYDraft(Qwen3PreTrainedModel):
             all_mtp_position_ids.append(sample_mtp_position_ids)
             all_mask_labels.append(sample_mask_labels)
             all_target_indices.append(target_indices_flat + sample_start)
-            all_sample_ids.append(
-                torch.full((block_total_len,), sample_idx, dtype=torch.long, device=device)
-            )
+            all_sample_ids.append(torch.full((block_total_len,), sample_idx, dtype=torch.long, device=device))
             all_weight_mask.append(sample_weight_mask)
 
         if len(all_mtp_input_ids) == 0:
@@ -693,9 +688,7 @@ class MYDraft(Qwen3PreTrainedModel):
 
         total_mtp_len = len(mtp_input_ids)
 
-        mtp_attention_mask = torch.zeros(
-            total_mtp_len, total_len + total_mtp_len, dtype=torch.bool, device=device
-        )
+        mtp_attention_mask = torch.zeros(total_mtp_len, total_len + total_mtp_len, dtype=torch.bool, device=device)
 
         mtp_offset = 0
         for sample_blocks_data in all_target_indices:
@@ -712,12 +705,10 @@ class MYDraft(Qwen3PreTrainedModel):
                 sample_end = cu_seqlens[sample_idx + 1].item()
 
                 if first_target_idx > sample_start:
-                    mtp_attention_mask[
-                        block_start:block_end, sample_start:first_target_idx
-                    ] = True
+                    mtp_attention_mask[block_start:block_end, sample_start:first_target_idx] = True
                 mtp_attention_mask[
                     block_start:block_end,
-                    total_len + block_start:total_len + block_end,
+                    total_len + block_start : total_len + block_end,
                 ] = True
             mtp_offset += num_blocks * block_size
 
@@ -752,27 +743,15 @@ class MYDraft(Qwen3PreTrainedModel):
         block_mask = None
         if FLEX_ATTENTION_AVAILABLE:
             num_blocks = (total_mtp_len + block_size - 1) // block_size
-            block_first_target_indices = torch.zeros(
-                1, num_blocks, dtype=torch.long, device=device
-            )
-            block_sample_ids = torch.zeros(
-                1, num_blocks, dtype=torch.long, device=device
-            )
-            block_valid_mask = torch.zeros(
-                1, num_blocks, dtype=torch.bool, device=device
-            )
+            block_first_target_indices = torch.zeros(1, num_blocks, dtype=torch.long, device=device)
+            block_sample_ids = torch.zeros(1, num_blocks, dtype=torch.long, device=device)
+            block_valid_mask = torch.zeros(1, num_blocks, dtype=torch.bool, device=device)
 
-            block_first_indices = torch.arange(
-                0, total_mtp_len, block_size, device=device
-            )
+            block_first_indices = torch.arange(0, total_mtp_len, block_size, device=device)
             if len(block_first_indices) > 0:
-                block_first_target_indices[0, :len(block_first_indices)] = (
-                    target_indices_flat[block_first_indices]
-                )
-                block_sample_ids[0, :len(block_first_indices)] = sample_ids[
-                    block_first_indices
-                ]
-                block_valid_mask[0, :len(block_first_indices)] = True
+                block_first_target_indices[0, : len(block_first_indices)] = target_indices_flat[block_first_indices]
+                block_sample_ids[0, : len(block_first_indices)] = sample_ids[block_first_indices]
+                block_valid_mask[0, : len(block_first_indices)] = True
 
             block_mask = self._create_flex_attention_mask(
                 block_first_target_indices,
@@ -820,12 +799,7 @@ class MYDraft(Qwen3PreTrainedModel):
             sample_end = cu_seqlens[sample_idx + 1]
 
             is_context = kv_idx < total_len
-            mask_context = (
-                is_context
-                & (sample_start <= kv_idx)
-                & (kv_idx < first_target_idx)
-                & (kv_idx < sample_end)
-            )
+            mask_context = is_context & (sample_start <= kv_idx) & (kv_idx < first_target_idx) & (kv_idx < sample_end)
             is_draft = kv_idx >= total_len
             kv_block_id = (kv_idx - total_len) // block_size
             mask_draft = is_draft & (q_block_id == kv_block_id)
@@ -833,8 +807,12 @@ class MYDraft(Qwen3PreTrainedModel):
 
         try:
             return create_block_mask(
-                mask_fn, B=1, H=None, Q_LEN=total_mtp_len,
-                KV_LEN=total_seq_len, device=device,
+                mask_fn,
+                B=1,
+                H=None,
+                Q_LEN=total_mtp_len,
+                KV_LEN=total_seq_len,
+                device=device,
             )
         except torch.cuda.OutOfMemoryError as e:
             print(f"Warning: FlexAttention block mask creation failed (OOM): {e}")
@@ -878,9 +856,7 @@ class MYDraft(Qwen3PreTrainedModel):
                 use_cache=False,
                 **kwargs,
             )
-        target_hidden = extract_context_feature(
-            target_out.hidden_states, self.draft_model.target_layer_ids
-        )
+        target_hidden = extract_context_feature(target_out.hidden_states, self.draft_model.target_layer_ids)
 
         # NOTE: distillation has been removed (loss is now exactly aligned
         # with SpecForge's OnlineDFlashModel). We therefore no longer need
@@ -908,9 +884,7 @@ class MYDraft(Qwen3PreTrainedModel):
 
         # Full position_ids for RoPE: [target_position_ids | mtp_position_ids]
         # because key_states = concat([k_ctx, k_noise], dim=1).
-        full_position_ids = torch.cat(
-            [context_position_ids, mtp_position_ids], dim=-1
-        )
+        full_position_ids = torch.cat([context_position_ids, mtp_position_ids], dim=-1)
 
         draft_output = self.draft_model(
             position_ids=full_position_ids,
@@ -922,11 +896,7 @@ class MYDraft(Qwen3PreTrainedModel):
         )
         hidden_states = draft_output
 
-        slice_indices = (
-            slice(-logits_to_keep, None)
-            if isinstance(logits_to_keep, int)
-            else logits_to_keep
-        )
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         # Use the target's lm_head at training time (tie_word_embeddings=True
         # in HunyuanOCR — vLLM will load the draft's own lm_head from this
         # checkpoint via process_eagle_weight if requested).
@@ -967,23 +937,14 @@ class MYDraft(Qwen3PreTrainedModel):
             # Apply in-block loss decay: pos k gets weight exp(-(k-1)/gamma);
             # pos 0 (anchor) is already zeroed via weight_mask but we still
             # clamp k-1 at >=0 to be safe.
-            if (
-                self.loss_decay_gamma is not None
-                and self.loss_decay_gamma > 0
-                and flat_weights.numel() > 0
-            ):
+            if self.loss_decay_gamma is not None and self.loss_decay_gamma > 0 and flat_weights.numel() > 0:
                 bs = self.block_size
                 total_mtp_len = flat_weights.numel()
                 pos_in_block = torch.arange(total_mtp_len, device=device) % bs
-                decay = torch.exp(
-                    -(pos_in_block.float() - 1.0).clamp(min=0.0)
-                    / float(self.loss_decay_gamma)
-                )
+                decay = torch.exp(-(pos_in_block.float() - 1.0).clamp(min=0.0) / float(self.loss_decay_gamma))
                 flat_weights = flat_weights * decay
 
-            loss_per_token = F.cross_entropy(
-                flat_logits.float(), safe_labels, reduction="none"
-            )
+            loss_per_token = F.cross_entropy(flat_logits.float(), safe_labels, reduction="none")
             valid_token_count = flat_weights.sum() + 1e-6
             ce_loss = (loss_per_token * flat_weights).sum() / valid_token_count
             loss = ce_loss
@@ -1047,13 +1008,13 @@ class MYDraft(Qwen3PreTrainedModel):
         return [p for p in self.parameters() if p.requires_grad]
 
     def print_parameter_info(self):
-        total_params     = sum(p.numel() for p in self.parameters())
-        trainable_total  = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        frozen_total     = total_params - trainable_total
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_total = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        frozen_total = total_params - trainable_total
 
         # breakdown by named sub-module
-        target_params    = sum(p.numel() for p in self.target_model.parameters())
-        draft_trainable  = sum(p.numel() for p in self.draft_model.parameters() if p.requires_grad)
+        target_params = sum(p.numel() for p in self.target_model.parameters())
+        draft_trainable = sum(p.numel() for p in self.draft_model.parameters() if p.requires_grad)
 
         print(f"Target model parameters  (frozen)    : {target_params:,}")
         print(f"Draft model parameters   (trainable) : {draft_trainable:,}")

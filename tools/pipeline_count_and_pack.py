@@ -24,25 +24,15 @@ from multiprocessing import Process, Queue
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 
-import binpacking
 from PIL import Image
 from tqdm import tqdm
 from transformers import AutoProcessor
 
-# Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# from hunyuan_vl.processing_hunyuan_vl import HunYuanVLProcessor
-# from hunyuan_vl.image_processing_hunyuan_vl import HunYuanVLImageProcessor
-
-# from transformers import HunYuanVLProcessor
-# from transformers.models.hunyuan_vl.image_processing_hunyuan_vl import HunYuanVLImageProcessor
-
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+from tools.pack_utils import pack_data, read_input_list
+from train.data_utils import get_img_path
 
 
 # ---------------------------------------------------------------------------
@@ -59,15 +49,13 @@ class DataArguments:
 # ---------------------------------------------------------------------------
 def normalize_sample(data: dict) -> tuple[str, str, str] | None:
     """Convert supported raw OCR schemas to image/question/answer fields."""
+    image_path = get_img_path(data)
     if data.get("conv"):
         turn = data["conv"][0]
-        image_path = data.get("img_path_sh") or data.get("img_path_cq")
         question = turn.get("question", "")
         answer = turn.get("answer", "")
     else:
-        image_paths = data.get("image_path") or []
         conversations = data.get("conversations") or []
-        image_path = image_paths[0] if image_paths else None
         question = ""
         answer = ""
         for turn in conversations:
@@ -234,50 +222,6 @@ def count_tokens_for_file(
 
         traceback.print_exc()
         result_queue.put((str(jsonl_path), None, False))
-
-
-# ---------------------------------------------------------------------------
-# Packing
-# ---------------------------------------------------------------------------
-def pack_data(data_list: list, pack_length: int, batch_size: int = 1024) -> list:
-    """
-    Pack samples into bins of at most pack_length tokens.
-    Process in batches to keep memory bounded.
-    """
-    all_packed = []
-    for i in range(0, len(data_list), batch_size):
-        batch = data_list[i : i + batch_size]
-        lengths = [d["num_tokens"] for d in batch]
-        grouped = binpacking.to_constant_volume(list(enumerate(lengths)), pack_length, weight_pos=1)
-        for group in grouped:
-            group_data = []
-            for idx, _ in group:
-                item = batch[idx]
-                group_data.append(
-                    {
-                        "image": item["image"],
-                        "question": item["question"],
-                        "answer": item["answer"],
-                        "num_tokens": item["num_tokens"],
-                    }
-                )
-            all_packed.append(group_data)
-    return all_packed
-
-
-# ---------------------------------------------------------------------------
-# Read input list
-# ---------------------------------------------------------------------------
-def read_input_list(txt_path: Path) -> list[Path]:
-    """Read a txt file containing one JSONL file path per line.
-    Empty lines and lines starting with '#' are ignored."""
-    paths = []
-    with open(txt_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                paths.append(Path(line))
-    return paths
 
 
 # ---------------------------------------------------------------------------

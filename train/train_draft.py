@@ -61,13 +61,9 @@ transformers.logging.set_verbosity_info()
 # from hunyuan_vl.configuration_hunyuan_vl import HunYuanVLConfig
 
 
-
 local_rank = None
 
 logging.basicConfig(level=logging.INFO, force=True)
-
-
-
 
 
 def rank0_print(*args):
@@ -139,8 +135,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     if trainer.args.should_save:
         # Only save draft-related parameters (exclude frozen target_model)
         draft_state_dict = {
-            k.replace("draft_model.", ""): v for k, v in state_dict.items()
-            if not k.startswith("target_model.")
+            k.replace("draft_model.", ""): v for k, v in state_dict.items() if not k.startswith("target_model.")
         }
         cpu_state_dict = {k: v.cpu() for k, v in draft_state_dict.items()}
         del state_dict
@@ -150,15 +145,13 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 def train(attn_implementation="flash_attention_2"):
     global local_rank
 
-    parser = transformers.HfArgumentParser(
-        (ModelArguments, DataArguments, TrainingArguments, DraftArguments)
-    )
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments, DraftArguments))
     model_args, data_args, training_args, draft_args = parser.parse_args_into_dataclasses()
 
     local_rank = training_args.local_rank
     os.makedirs(training_args.output_dir, exist_ok=True)
 
-    training_args.lr_scheduler_kwargs = {'min_lr': 2e-6}
+    training_args.lr_scheduler_kwargs = {"min_lr": 2e-6}
 
     # ── Load processor ────────────────────────────────────────────────────
     rank0_print("Loading processor...")
@@ -170,7 +163,6 @@ def train(attn_implementation="flash_attention_2"):
     processor = AutoProcessor.from_pretrained(
         model_args.model_name_or_path,
     )
-    
 
     # ── Load target model ─────────────────────────────────────────────────
     rank0_print(f"Loading target model from {model_args.model_name_or_path} ...")
@@ -200,12 +192,13 @@ def train(attn_implementation="flash_attention_2"):
     if draft_args.load_draft_path is not None:
         # load safe checkpoint
         from safetensors.torch import load_file as safetensors_load_file
+
         draft_state_dict = safetensors_load_file(draft_args.load_draft_path, device="cpu")
         # draft_state_dict = torch.load(model_args.load_draft_path, map_location="cpu")
         draft_state_dict_new = {}
         for k, v in draft_state_dict.items():
             if k.startswith("draft_model."):
-                draft_state_dict_new[k[len("draft_model."):]] = v
+                draft_state_dict_new[k[len("draft_model.") :]] = v
             else:
                 draft_state_dict_new[k] = v
                 # del draft_state_dict[k]

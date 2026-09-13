@@ -77,7 +77,7 @@ TRAIN_DATA=./data/parsing_packed_20480.jsonl \
     bash scripts/sft_dflash.sh
 ```
 
-### Key hyperparameters (from-scratch profile)
+### Key hyperparameters
 
 | Env var            | Default | Meaning                           |
 | ------------------ | ------: | --------------------------------- |
@@ -133,7 +133,7 @@ TRAIN_DATA=./data/domain_packed_20480.jsonl \
     bash scripts/sft_dflash_finetune.sh
 ```
 
-### Key hyperparameters (v3 finetune profile)
+### Key hyperparameters
 
 | Env var       |      Default | Meaning                               |
 | ------------- | -----------: | ------------------------------------- |

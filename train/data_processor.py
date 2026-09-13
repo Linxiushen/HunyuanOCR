@@ -11,6 +11,11 @@ from torch.utils.data import Dataset
 from transformers import HunYuanVLProcessor
 from transformers.models.hunyuan_vl.modeling_hunyuan_vl import HunYuanVLModel
 
+from train.data_utils import IMAGE_PATH_KEYS, get_img_path
+
+# Packed samples carry "image"; raw samples carry "img_path" / "image_path".
+SAMPLE_IMAGE_KEYS = ("image", *IMAGE_PATH_KEYS)
+
 
 class _RopeIndexShim:
     """Lightweight carrier that reuses the model's exact multimodal position-id logic.
@@ -158,7 +163,8 @@ class VLDataset(Dataset):
                 try:
                     results.append(self._process_single_item(item))
                 except Exception as e:
-                    print(f"[WARNING] Skipping item in pack (image={item.get('image', 'N/A')}): {e}")
+                    img = get_img_path(item, SAMPLE_IMAGE_KEYS) or "N/A"
+                    print(f"[WARNING] Skipping item in pack (image={img}): {e}")
             if len(results) == 0:
                 # Fallback: try a random different index
                 return self.__getitem__(random.randint(0, len(self.data) - 1))
@@ -169,7 +175,8 @@ class VLDataset(Dataset):
             try:
                 return self._process_single_item(item)
             except Exception as e:
-                print(f"[WARNING] Skipping item (image={item.get('image', 'N/A')}): {e}")
+                img = get_img_path(item, SAMPLE_IMAGE_KEYS) or "N/A"
+                print(f"[WARNING] Skipping item (image={img}): {e}")
                 return self.__getitem__(random.randint(0, len(self.data) - 1))
 
     def _process_single_item(self, item: dict[str, Any]) -> dict[str, torch.Tensor]:
@@ -183,7 +190,7 @@ class VLDataset(Dataset):
         )
 
         if txn is not None:
-            image_path = item.get("image", source or "<lmdb>")  # used for messages content; just informational
+            image_path = get_img_path(item, SAMPLE_IMAGE_KEYS) or source or "<lmdb>"  # informational only
             image_id = item["image_id"]
             image_key = f"{image_id:08d}".encode()
             image_bytes = txn.get(image_key)
@@ -191,7 +198,9 @@ class VLDataset(Dataset):
                 raise KeyError(f"image_id {image_id} not found in LMDB (source={source})")
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         else:
-            image_path = item["image"]
+            image_path = get_img_path(item, SAMPLE_IMAGE_KEYS)
+            if not image_path:
+                raise KeyError(f"sample has no image path (expected one of: {', '.join(SAMPLE_IMAGE_KEYS)})")
             if not os.path.isabs(image_path):
                 image_path = os.path.join(self.image_folder, image_path)
             # Load image
@@ -324,9 +333,7 @@ class PackedVLDataCollator:
         start_idx = 0
         for length in sample_lengths:
             end_idx = start_idx + length
-            block = torch.triu(
-                torch.full((length, length), min_val, dtype=dtype), diagonal=1
-            )
+            block = torch.triu(torch.full((length, length), min_val, dtype=dtype), diagonal=1)
             mask[start_idx:end_idx, start_idx:end_idx] = block
             start_idx = end_idx
         return mask.unsqueeze(0).unsqueeze(0)
