@@ -110,7 +110,12 @@ def _parse_format3(text: str) -> list[tuple]:
         items = re.split(r"(?<=\))\s*(?=[^\s\(\),])", text)
         results = []
         for item in items:
-            match = re.match(r"([^\(]+)\((\d+),(\d+)\),\((\d+),(\d+)\)", item.strip())
+            # The text group must be non-greedy rather than ``[^\(]+``: recognised
+            # text legitimately contains parentheses ("ATLANTA (AP)", "金额(小写)"),
+            # and excluding "(" made the whole item fail to match and be dropped.
+            # Non-greedy still binds to the *first* coordinate pair, so items that
+            # carry extra trailing pairs keep their previous parse.
+            match = re.match(r"(.+?)\((\d+),(\d+)\),\((\d+),(\d+)\)", item.strip(), flags=re.DOTALL)
             if match:
                 content = match.group(1).strip()
                 x1, y1 = int(match.group(2)), int(match.group(3))
