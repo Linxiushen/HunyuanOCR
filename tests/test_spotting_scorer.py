@@ -59,6 +59,16 @@ class TestParseFormat3(unittest.TestCase):
             [("ATLANTA (AP)", 12, 34, 56, 78), ("Second line", 90, 12, 134, 156)],
         )
 
+    def test_incidental_parenthesis_then_more_text_is_kept(self):
+        # Reported by @pspdada: an incidental parenthesis in the middle of an
+        # item's text ("ATLANTA (AP) Second") followed by more text before the
+        # coordinates used to split the item at "(AP)" and drop "ATLANTA (AP)",
+        # leaving only ("Second", 1, 2, 3, 4).
+        self.assertEqual(
+            spotting._parse_format3("ATLANTA (AP) Second(1,2),(3,4)"),
+            [("ATLANTA (AP) Second", 1, 2, 3, 4)],
+        )
+
     def test_cjk_parenthetical_annotation_is_kept(self):
         self.assertEqual(
             spotting._parse_format3("金额(小写)(10,20),(30,40)"),
